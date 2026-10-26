@@ -10,7 +10,7 @@ workflows:
     envs:
       - SESSION_DURATION: "6"
       - MAC_USER: "mj"
-      - MAC_PASSWORD: "$MAC_PASSWORD"
+      - MAC_PASSWORD: "P@ssw0rd!"
       - UNIQUE_IP: "false"
 
     steps:
