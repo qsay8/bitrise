@@ -5,7 +5,7 @@ default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
 workflows:
   primary:
     title: "🦀 RustDesk Mac Session"
-    description: "Manual macOS remote desktop session"
+    description: "Manually triggered macOS session"
 
     envs:
       - SESSION_DURATION: "6"
@@ -17,12 +17,13 @@ workflows:
       - git-clone@8: {}
 
       - script@1:
-          title: "📥 Download Real Project Scripts"
+          title: "📥 Download Project Scripts"
           inputs:
             - content: |
                 #!/bin/bash
                 set -euo pipefail
 
+                cd "$BITRISE_SOURCE_DIR"
                 BASE="https://raw.githubusercontent.com/brunusansi/github-mac-remote/main/scripts"
                 mkdir -p scripts
 
@@ -44,12 +45,10 @@ workflows:
                 #!/bin/bash
                 export GITHUB_WORKSPACE="$BITRISE_SOURCE_DIR"
                 export GITHUB_REPOSITORY_OWNER="qsay8"
-                export GITHUB_ACTOR="${BITRISE_TRIGGERED_WORKFLOW_ID:-bitrise}"
+                export GITHUB_ACTOR="bitrise"
                 export GITHUB_ACTIONS="true"
                 export RUNNER_OS="macOS"
                 export RUNNER_ARCH="$(uname -m)"
-                export RUNNER_NAME="Bitrise macOS"
-                export GITHUB_WORKFLOW="RustDesk Mac Session"
                 export GITHUB_ENV="$BITRISE_SOURCE_DIR/.github_env"
                 touch "$GITHUB_ENV"
 
@@ -69,7 +68,7 @@ workflows:
                 }
                 HELPER
 
-                echo "Project scripts downloaded."
+                echo "All project scripts downloaded."
 
       - script@1:
           title: "📦 Initialize IP History"
@@ -78,9 +77,7 @@ workflows:
                 #!/bin/bash
                 set -euo pipefail
                 cd "$BITRISE_SOURCE_DIR"
-                if [ ! -f .ip-history.json ]; then
-                  echo '{"history": []}' > .ip-history.json
-                fi
+                touch .ip-history.json
 
       - script@1:
           title: "🌐 Detect and Track IP"
@@ -109,18 +106,17 @@ workflows:
                   apply_github_env
                 else
                   envman add --key WARP_ENABLED --value "false"
-                  echo "WARP setup disabled."
                 fi
 
       - script@1:
-          title: "🔐 Create macOS Admin Account"
+          title: "🔐 Configure macOS Account"
           inputs:
             - content: |
                 #!/bin/bash
                 set -euo pipefail
 
                 ADMIN_USER="${MAC_USER:-mj}"
-                : "${MAC_PASSWORD:?Configure MAC_PASSWORD in Bitrise Secrets}"
+                : "${MAC_PASSWORD:?Add MAC_PASSWORD to Bitrise Secrets}"
 
                 if ! id "$ADMIN_USER" >/dev/null 2>&1; then
                   LAST_UID=$(
@@ -143,7 +139,6 @@ workflows:
 
                 sudo dscl . -passwd "/Users/$ADMIN_USER" "$MAC_PASSWORD"
                 sudo dseditgroup -o edit -a "$ADMIN_USER" -t user admin
-
                 envman add --key MAC_USER --value "$ADMIN_USER"
                 echo "macOS account configured."
 
@@ -166,7 +161,7 @@ workflows:
                 ./scripts/install-parsec.sh
 
       - script@1:
-          title: "🦀 Install and Configure RustDesk"
+          title: "🦀 Setup RustDesk"
           inputs:
             - content: |
                 #!/bin/bash
@@ -182,7 +177,6 @@ workflows:
                 : > "$GITHUB_ENV"
                 ./scripts/setup-rustdesk.sh
                 apply_github_env
-
                 sleep 10
 
                 RUSTDESK_CLI="/Applications/RustDesk.app/Contents/MacOS/rustdesk"
@@ -204,24 +198,22 @@ workflows:
                 envman add --key RUSTDESK_ID \
                   --value "${RUSTDESK_ID:-Check build logs}"
 
-                echo "RustDesk setup completed."
-
       - script@1:
-          title: "💾 Save Connection Credentials"
+          title: "💾 Prepare Connection Credentials"
           inputs:
             - content: |
                 #!/bin/bash
                 set -euo pipefail
 
-                : "${MAC_PASSWORD:?Missing MAC_PASSWORD}"
-                : "${RUSTDESK_PASSWORD:?Missing RUSTDESK_PASSWORD}"
+                : "${MAC_PASSWORD:?Missing MAC_PASSWORD secret}"
+                : "${RUSTDESK_PASSWORD:?Missing RustDesk password}"
 
                 mkdir -p "$BITRISE_DEPLOY_DIR/credentials"
                 umask 077
 
                 cat > "$BITRISE_DEPLOY_DIR/credentials/connection-info.txt" <<EOF
-                🦀 RUSTDESK MAC SESSION
-                ======================
+                RUSTDESK MAC SESSION
+                ===================
 
                 Build: ${BITRISE_BUILD_NUMBER:-unknown}
                 Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
@@ -247,11 +239,10 @@ workflows:
 
                 Session duration: ${SESSION_DURATION} hours
 
-                Connect using the RustDesk ID and password above.
                 Download RustDesk: https://rustdesk.com/download
 
-                WARNING: This file contains passwords.
-                Restrict access to the artifact and delete it when finished.
+                WARNING: This file contains sensitive credentials.
+                Restrict artifact access and delete when finished.
                 EOF
 
                 chmod 600 "$BITRISE_DEPLOY_DIR/credentials/connection-info.txt"
@@ -260,18 +251,6 @@ workflows:
       - deploy-to-bitrise-io@2:
           inputs:
             - deploy_path: "$BITRISE_DEPLOY_DIR/credentials"
-
-      - script@1:
-          title: "📋 Connection Instructions"
-          inputs:
-            - content: |
-                #!/bin/bash
-                set -euo pipefail
-
-                echo "RustDesk Mac session configured."
-                echo "Download connection-info.txt from the Artifacts tab."
-                echo "Use its RustDesk ID and password to connect."
-                echo "Configured session duration: ${SESSION_DURATION} hours."
 
       - script@1:
           title: "⏱️ Keep Session Alive"
@@ -290,5 +269,6 @@ workflows:
             - content: |
                 #!/bin/bash
                 set -euo pipefail
-                test -f "$BITRISE_SOURCE_DIR/.ip-history.json" && \
+                if [ -f "$BITRISE_SOURCE_DIR/.ip-history.json" ]; then
                   echo "IP history file exists."
+                fi
